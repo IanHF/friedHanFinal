@@ -310,10 +310,21 @@ def p_command_constants(p):
     commands.append(cmd)
 
 def p_command_light(p):
-    "command : LIGHT SYMBOL NUMBER NUMBER NUMBER NUMBER NUMBER NUMBER"
-    symbols[p[2]] = ['light', {'location' : p[3:6], 'color' : p[6:]}]
-    cmd = {'op':p[1], 'args' : None, 'light' : p[2] }
+    """command : LIGHT SYMBOL NUMBER NUMBER NUMBER NUMBER NUMBER NUMBER
+    	       | LIGHT SYMBOL NUMBER NUMBER NUMBER NUMBER NUMBER NUMBER NUMBER NUMBER NUMBER SYMBOL"""
+    print p
+    print len(p)
+    if len(p) == 13:
+        symbols[p[2]] = ['light', {'location' : p[3:6], 'end_location': p[6:9],  'color' : p[9:12]}]
+        cmd = {'op':p[1], 'args' : p[3:12], 'light' : p[2] }
+        cmd['knob'] = p[12]
+        symbols[p[12]] = ['knob', 0]
+    else:
+        print "test"
+        symbols[p[2]] = ['light', {'location' : p[3:6], 'color' : p[6:9]}]
+        cmd = {'op':p[1], 'args' : p[3:9], 'light' : p[2] }
     commands.append(cmd)
+        
 
 def p_command_shading(p):
     "command : SHADING SHADING_TYPE"
@@ -360,6 +371,8 @@ def p_save_coords(p):
     commands.append(cmd)
 
 
+
+    
 def p_tween(p):
     "command : TWEEN NUMBER NUMBER SYMBOL SYMBOL"
     cmd = {'op':p[1], 'args':p[2:4], 'knob_list0':p[4], 'knob_list1':p[5]}

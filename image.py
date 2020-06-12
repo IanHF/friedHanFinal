@@ -1,9 +1,11 @@
 #SPECIAL THANKS TO IAN WILLIAMS FOR HELPING ME WITH SOME DEBUGGING, PRAISE PROGRAMMER JESUS, PEACE BE UPON HIM
 #<3 IW
 import mdl
-from math import cos, sin, radians, pi as PI
+import sys
+from math import cos, sin, radians, pi as PI, sqrt
 from random import randint
 import os
+import pywavefront
 
 # Core Matrix functionality
 def matrix_mult( m1, m2 ):
@@ -108,7 +110,7 @@ def circle_point(x, y, theta, r):
 def normalize(v):
     """ Returns a normalized vector. """
     #print v
-    m = (v[0] ** 2) + (v[1] ** 2) + (v[2] ** 2)
+    m = sqrt((v[0] ** 2) + (v[1] ** 2) + (v[2] ** 2))
     return [(i / m if m else 0)for i in v]
 def dot_product(a, b):
     """ Return the dot product of 2 vectors. """
@@ -124,7 +126,7 @@ def normal(m, i):
     n = [(a[1] * b[2]) - (a[2] * b[1]),
 	 (a[2] * b[0]) - (a[0] * b[2]),
 	 (a[0] * b[1]) - (a[1] * b[0])];
-    return n
+    return normalize(n)
 
 # Point generation for useful 3d shapes. And toruses...
 ## Useful globals
@@ -169,7 +171,7 @@ class Picture:
     """ A class that represents a canvas, upon which artists can create beautiful works."""
     def __init__(self, n, w, h):
         self.name = n
-        self.view_vector = [0, 0, 1]
+        self.view_vector = normalize([0, 0, 1])
         self.width, self.height = (w, h)
         self.pixels = [[[0, 0, 0] for i in range(self.width)] for j in range(self.height)]
         self.z_buf = [[float('-inf') for i in range(self.width)] for j in range(self.height)]
@@ -177,6 +179,7 @@ class Picture:
         self.edge_matrix = [[], [], [], []]
         self.triangle_matrix = [[], [], [], []]
         self.transformation_matrix = ident(new_matrix())
+        self.lights = []
 
     def plot(self, x, y, z, color):
         """ Plot a point on the screen. """
@@ -473,19 +476,18 @@ class Picture:
             return
         point = 0
         while point < len(matrix[0]) - 1:
-            if dot_product(normal(matrix, point), self.view_vector) >= 0:
-                color = [50, 50, 50]
-                new_color = [color[i] * AMBIENT[i] for i in range(3)]
-                for i in range(3):
-                    #print point
-                    #print normal(matrix, point)
-                    nl = dot_product(normalize(normal(matrix, point)), LIGHT_VECTOR);
-                    new_color[i] += max(0, color[i] * LIGHT_COLOR[i] * DIFFUSE[i] * nl) + \
-                        max(0,  LIGHT_COLOR[i] * SPECULAR[i] * \
-                            ((dot_product([(2 * nl * normalize(normal(matrix, point))[c]) - LIGHT_VECTOR[c] for c in range(3)], self.view_vector)) ** 2))
-                    new_color[i] = min(255, new_color[i])
-                #print(new_color)
-                new_color = [int(c) for c in new_color]
+            the_normal = normal(matrix, point)
+            if dot_product(the_normal, self.view_vector) >= 0:
+                new_color = [AMBIENT[i] * 255 for i in range(3)]
+                for light in self.lights:
+                    location = normalize(light['location'])
+                    nl = dot_product(the_normal, location)
+                    spec = dot_product([(2 * nl * the_normal[i]) - location[i] for i in range(3)], self.view_vector) ** 2
+                    for i in range(3):
+                        val = light['color'][i] * DIFFUSE[i] * nl
+                        new_color[i] += max(0, light['color'][i] * DIFFUSE[i] * nl) + \
+                            max(0,  light['color'][i] * SPECULAR[i] * spec)
+                new_color = [min(255, int(c)) for c in new_color]
                 self.fill_triangle(point, new_color)
             point += 3
     def clear_screen(self):
@@ -518,9 +520,6 @@ class Picture:
         f.write(self.pixels_to_ascii())
         f.close()
 
-# Commands in a script file for which arguments must be given
-ARG_COMMANDS = [ 'line', 'scale', 'move', 'rotate', 'save', 'bezier', 'hermite', 'circle', 'box', 'sphere', 'torus']
-
 def run(filename):
     """
     This function runs an mdl script
@@ -544,8 +543,6 @@ def run(filename):
 
     color = [0, 0, 0]
     
-    #screen = new_screen()
-    #zbuffer = new_zbuffer()
     tmp = []
     step_3d = 100
     consts = ''
@@ -570,6 +567,10 @@ def run(filename):
     for command in commands:
         if command["op"] == "vary":
             VARY[command["knob"]].append(command["args"])
+    print symbols
+    for symbol in symbols:
+        if symbols[symbol][0] == 'light':
+            screen.lights.append(symbols[symbol][1])
     VARIABLE = {}
     for var in VARY:
         VARIABLE[var] = [0] * FRAMES
@@ -577,16 +578,19 @@ def run(filename):
             inc = (d[3] - d[2]) / (d[1] - d[0])
             for i in range(int(d[1] - d[0]) + 1):
                 VARIABLE[var][int(d[0]) + i] = d[2] + (inc * i)
-
     for frame in range(FRAMES):
         tmp = new_matrix()
         ident( tmp )
         stack = [tmp]
         screen.clear_screen()
         for command in commands:
+            print command
             args = command["args"]
             if command.has_key("knob") and command["knob"]:
-                args = [(a * VARIABLE[command["knob"]][frame] if not isinstance(a, str) else a) for a in args]
+                if command['op'] == 'light':
+                    args = [((args[i + 3] - args[i]) * VARIABLE[command["knob"]][frame]) + args[i] for i in range(3)]
+                else:
+                    args = [(a * VARIABLE[command["knob"]][frame] if not isinstance(a, str) else a) for a in args]
             if command.has_key("constants") and command["constants"]:
                 con = symbols[command["constants"]][1]
                 AMBIENT = [con['red'][0], con['green'][0], con['blue'][0]]
@@ -601,6 +605,8 @@ def run(filename):
                 stack.append([[col for col in row] for row in stack[-1]])
             elif command["op"] == "pop":
                 stack.pop()
+            elif command["op"] == "light":
+                symbols[command['light']][1]['location'] = args
             elif command["op"] == "move":
                 t = make_translate(*args)
                 matrix_mult(stack[-1], t)
@@ -643,6 +649,19 @@ def run(filename):
                 screen.save()
                 if command["op"] == 'display':
                     os.system('display *.ppm')
+            elif command["op"] == "mesh":
+                #print
+                scene = pywavefront.Wavefront(command['cs'])
+                for name, material in scene.materials.items():
+                    print name, material.vertex_format, len(material.vertices) / 3
+                    for v in range(0, len(material.vertices), 9):
+                        a = material.vertices[v : v + 3] + material.vertices[v + 6 : v + 9] + material.vertices[v + 3 : v + 6]
+                        screen.add_polygon(*a)
+                        
+                matrix_mult(stack[-1], screen.triangle_matrix )
+                screen.draw_polygons()
+                screen.clear_triangle_matrix()
+                    
         if FRAMES > 1:
             screen.save(num = frame)
             if command["op"] == 'display':
@@ -657,7 +676,7 @@ def main():
     transform = [ [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]
     color = [255, 255, 255]
     ident(transform)
-    run( 'spinny.mdl')
+    run(sys.argv[1])
 
 if __name__ == "__main__":
     main()
